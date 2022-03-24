@@ -6,45 +6,32 @@ import torch.utils.data as data
 import torchvision
 import matplotlib.pyplot as plt
 import numpy as np
-
-######################################################## 
-# get device
-########################################################
-ngpu= 1
-device = torch.device("cuda:0" if (torch.cuda.is_available() and ngpu > 0) else "cpu")
-print(device)
-
-########################################################
-# get dataset
-########################################################
-ROOT = '.data'
-
-batch_size = 64
-
-transforms_train = torchvision.transforms.Compose([
-                           torchvision.transforms.RandomCrop(32, padding=4),
-                           torchvision.transforms.RandomHorizontalFlip(),
-                           torchvision.transforms.ToTensor()])
-
-transforms_test = torchvision.transforms.Compose([
-                           torchvision.transforms.ToTensor()])
-
-train_data = torchvision.datasets.CIFAR10(root = ROOT, 
-                           train = True, 
-                           download = True, 
-                           transform = transforms_train)
+from tqdm import *
+from torchsummary import summary
+import argparse
 
 
-trainloader = torch.utils.data.DataLoader(train_data, batch_size=batch_size,
-                                         shuffle=True, num_workers=2)
+def get_data():
+  ROOT = '.data'
 
-test_data = torchvision.datasets.CIFAR10(root = ROOT, 
-                           train = False, 
-                           download = True, 
-                           transform = transforms_test)
+  transforms_train = torchvision.transforms.Compose([
+                             torchvision.transforms.RandomCrop(32, padding=4),
+                             torchvision.transforms.RandomHorizontalFlip(),
+                             torchvision.transforms.ToTensor()])
 
-testloader = torch.utils.data.DataLoader(test_data, batch_size=batch_size,
-                                         shuffle=False, num_workers=2)
+  transforms_test = torchvision.transforms.Compose([
+                             torchvision.transforms.ToTensor()])
+
+  train_data = torchvision.datasets.CIFAR10(root = ROOT, 
+                             train = True, 
+                             download = True, 
+                             transform = transforms_train)
+
+  test_data = torchvision.datasets.CIFAR10(root = ROOT, 
+                             train = False, 
+                             download = True, 
+                             transform = transforms_test)
+  return train_data, test_data
 
   
 ########################################################
@@ -131,21 +118,33 @@ def model_test(net):
     acc_num += torch.sum(y_pred == y_ts)
 
   acc = acc_num/len(test_data)
+  # return acc
   return np.array(acc.clone().detach().cpu())
 
 
-########################################################
-# Training parameter
-########################################################
-train = 1
-lr = 0.001
-num_epochs = 1000
+if __name__ == '__main__':
+  lr = 0.001
+  batch_size = 64
+  ngpu= 1
 
+  parser = argparse.ArgumentParser()
+  parser.add_argument('-epoch', default=500, type=int, help='Number of epochs')
+  parser.add_argument('-train', action='store_true', help='Train mode')
+  parser.add_argument('-test', action='store_true', help='Test mode')
+  parser.add_argument('-summary', action='store_true', help='Show model summary')
+  args = parser.parse_args()
 
-########################################################
-# Start
-########################################################
-if train==0:
+  num_epochs = args.epoch
+  print("number of epochs = " + str(num_epochs))
+
+  device = torch.device("cuda:0" if (torch.cuda.is_available() and ngpu > 0) else "cpu")
+  print(device)
+
+  train_data, test_data = get_data()
+  trainloader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=2)
+  testloader = torch.utils.data.DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=2)
+
+  if args.train:
     net = project1_model().to(device)
     # optimizer = torch.optim.SGD(net.parameters(), lr=lr)
     optimizer = torch.optim.Adam(net.parameters(), lr=lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
@@ -154,57 +153,56 @@ if train==0:
     tr_loss = []
     ts_loss = []
     acc_list = []
-    acc_max = 0.935
+    acc_max = 0
 
     for epoch in range(num_epochs):
-        net.train()
-        train_loss = 0
-        # for i, (X, y) in enumerate(tqdm(trainloader)):
-        for i, (X, y) in enumerate(trainloader):
+      net.train()
+      train_loss = 0
+      for i, (X, y) in enumerate(tqdm(trainloader)):
+      # for i, (X, y) in enumerate(trainloader):
 
-          optimizer.zero_grad()
-          X, y = X.to(device), y.to(device)
-          y_hat = net(X)
-          l = loss(y_hat, y)
-          l.backward()
-          optimizer.step()
+        optimizer.zero_grad()
+        X, y = X.to(device), y.to(device)
+        y_hat = net(X)
+        l = loss(y_hat, y)
+        l.backward()
+        optimizer.step()
 
-          train_loss += l.item()
+        train_loss += l.item()
 
-        net.eval()
-        test_loss = 0
-        acc_num = 0
-        for i, (X_ts, y_ts) in enumerate(testloader):
-        
-        
-          X_ts, y_ts = X_ts.to(device), y_ts.to(device)
-          y_ts_hat = net(X_ts)
-          l_ts = loss(y_ts_hat, y_ts)
-          test_loss += l_ts.item()
-
-          y_pred = torch.argmax(y_ts_hat,axis=1)
-          acc_num += torch.sum(y_pred == y_ts)
+      net.eval()
+      test_loss = 0
+      acc_num = 0
+      for i, (X_ts, y_ts) in enumerate(testloader):
 
 
-        train_loss = train_loss*batch_size/len(train_data)
-        test_loss = test_loss*batch_size/len(test_data)
+        X_ts, y_ts = X_ts.to(device), y_ts.to(device)
+        y_ts_hat = net(X_ts)
+        l_ts = loss(y_ts_hat, y_ts)
+        test_loss += l_ts.item()
 
-        acc = acc_num/len(test_data)
+        y_pred = torch.argmax(y_ts_hat,axis=1)
+        acc_num += torch.sum(y_pred == y_ts)
 
-        ts_loss.append(test_loss)
-        tr_loss.append(train_loss)
-        acc_list.append(acc)
 
-        if epoch%10==0:
-          print('Epoch %d, training loss is %f, testing loss is %f, acc is %f'%(epoch,train_loss,test_loss,acc))
-        if acc >= acc_max:
-          accuracy = acc.cpu().numpy()
-          filename = 'project1_model.pt'
-          torch.save(net, filename)
-          acc_max = acc;
-        # if acc > 0.94:
-          # break
+      train_loss = train_loss*batch_size/len(train_data)
+      test_loss = test_loss*batch_size/len(test_data)
 
+      acc = acc_num/len(test_data)
+
+      ts_loss.append(test_loss)
+      tr_loss.append(train_loss)
+      acc_list.append(acc)
+
+
+      print('Epoch %d, training loss is %f, testing loss is %f, acc is %f'%(epoch,train_loss,test_loss,acc))
+      if acc >= acc_max:
+        accuracy = acc.cpu().numpy()
+        filename = 'project1_model.pt'
+        torch.save(net, filename)
+        acc_max = acc;
+      # if acc > 0.94:
+        # break
 
     plt.plot(range(epoch+1),tr_loss,'-',linewidth=3,label='Train loss')
     plt.plot(range(epoch+1),ts_loss,'-',linewidth=3,label='Test loss')
@@ -217,11 +215,14 @@ if train==0:
     plt.xlabel('epoch')
     plt.ylabel('accuracy')
     plt.grid(True)
-    plt.legend()
-    print("The best accuracy is " + acc_max)
-
-else:
+    plt.legend()  
+  elif args.test:
     model_path = "project1_model.pt" 
     net=torch.load(model_path)
     best_acc = model_test(net)
-    print("The accuracy is " + str(best_acc))
+    print("The best accuracy is " + str(best_acc))  
+  elif args.summary:
+    net = project1_model().to(device)
+    summary(net,(3,32,32))
+  else:
+    print("please define a train/test mode")
